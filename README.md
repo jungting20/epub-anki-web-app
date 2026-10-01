@@ -82,6 +82,66 @@ npm test
 - 실제 Chromium 브라우저: 업로드·중복, 선택 유지·복사·초기화, 스크립트 차단, 목차 이동, 설정 변경·복원, 글자 변경 시 같은 문단 유지, 새로고침·책 전환 복원, 서버 PUT 503 중 로컬 복원과 연결 복구 후 반영, 오래된 서버 요청 거절, iPad 너비에서 패널 접기, 잘못된 EPUB 오류와 크기 제한.
 - 로컬 서버를 종료하고 프로덕션 모드로 재실행한 뒤 책 목록과 서버 위치가 동일한지 별도 확인합니다.
 
+## Docker와 Kubernetes
+
+컨테이너는 Node.js 24 Debian 기반으로 빌드하며 Next.js standalone 서버를
+`0.0.0.0:3000`에서 실행합니다. 로컬 개발과 `npm start`의 바인딩은 유지합니다.
+SQLite 네이티브 모듈은 이미지 안에서 설치하므로 macOS의 `node_modules`를 복사하지
+않습니다. 데이터와 `.env` 파일도 이미지에서 제외합니다.
+
+```sh
+docker build -t epub-reader:local .
+docker volume create epub-reader-data
+docker run --name epub-reader --rm -p 127.0.0.1:3000:3000 \
+  --mount source=epub-reader-data,target=/data epub-reader:local
+```
+
+컨테이너를 종료하고 같은 명령으로 다시 실행하면 기존 책장과 읽기 위치를 유지합니다.
+이 볼륨에는 새로운 책장을 만듭니다. 기존 로컬 `data/`가 자동으로 복사되지는 않습니다.
+기존 데이터를 이전할 때는 원본 서버를 정지한 후 데이터 디렉터리 전체를 복사하고,
+컨테이너 사용자 UID/GID `1000:1000`이 읽고 쓸 수 있는지 확인하세요.
+
+`deploy/`는 운영 환경 하나를 위한 Kustomize 설정입니다. 단일 Pod와 `Recreate`
+전략을 사용하므로 배포 중 짧은 중단이 발생합니다. `/data`에는 5Gi PVC를 연결합니다.
+기본 StorageClass가 SQLite WAL에 적합한 블록 스토리지인지 먼저 확인하고,
+필요하면 `pvc.yaml`에 `storageClassName`을 지정하세요. NFS는 사용하지 않습니다.
+CPU/메모리 값은 초기값이며 최대 50MB EPUB 업로드를 측정해 조정해야 합니다.
+
+아래의 `YOUR_ACCOUNT`와 `VERSION`을 실제 값으로 바꾸고, 노드 아키텍처에 맞는
+이미지를 레지스트리에 먼저 올리세요. 다른 아키텍처나 여러 아키텍처에 배포한다면
+`docker buildx build --platform ... --push`를 사용합니다.
+
+```sh
+docker tag epub-reader:local ghcr.io/YOUR_ACCOUNT/epub-reader:VERSION
+docker push ghcr.io/YOUR_ACCOUNT/epub-reader:VERSION
+```
+
+`deploy/deployment.yaml`의 `image` 자리표시자를 발행한 이미지 주소로 바꾸세요.
+GitOps에서는 `ghcr.io/YOUR_ACCOUNT/epub-reader@sha256:...`처럼 digest를 고정합니다.
+비공개 GHCR 이미지는 namespace에 pull 인증 Secret을 준비하고 Deployment의
+`spec.template.spec.imagePullSecrets`에 연결해야 합니다. 인증 값은 Git에 넣지 마세요.
+
+```sh
+kubectl kustomize deploy
+kubectl apply -k deploy
+kubectl -n epub-reader rollout status deployment/epub-reader
+kubectl -n epub-reader port-forward service/epub-reader 3000:80
+```
+
+Service는 ClusterIP이므로 우선 port-forward로 접속합니다. 도메인, TLS, VPN 또는
+인증 프록시는 실제 클러스터 구성에 맞춰 추가합니다. 앱에는 로그인 기능이 없습니다.
+Ingress를 추가한다면 50MB 파일의 multipart 여유를 포함한 요청 크기와 타임아웃을
+설정하세요. startup/liveness는 `/`, readiness는 SQLite에 접근하는 `/api/books`를
+검사합니다. 개인 책장에 접근하지 않는 별도 볼륨으로 업로드, 위치 저장, 재시작 후
+복원을 확인한 뒤 기존 데이터를 이전하세요.
+
+나중에 별도 GitOps 저장소를 만들면 `deploy/`를 옮기고 Argo CD가 그 경로를
+동기화하도록 연결합니다. Namespace와 PVC에는 Argo CD의 자동 prune 및 Application
+삭제 시 삭제를 막는 annotation을 넣었습니다. `kubectl delete`로 직접 삭제하는 것은
+막지 않으므로 데이터가 있는 namespace/PVC를 삭제하지 마세요. PV reclaim policy와
+데이터 백업/복원도 별도로 준비해야 합니다. DB 마이그레이션은 이미지 롤백으로
+되돌아가지 않습니다. 현재 CI와 Argo CD 연결은 포함하지 않습니다.
+
 ## 현재 제약
 
-개인용 단일 사용자이며 Anki, 음성 생성, LLM, 배포 설정은 포함하지 않습니다. DRM EPUB은 지원하지 않습니다. EPUB 2/3 메타데이터에 지정된 JPEG·PNG·GIF·WebP 표지를 표시하며, 표지가 없거나 형식을 지원하지 않으면 제목 첫 글자를 사용합니다. 일반적인 재배치 가능한 EPUB을 우선하며 고정 레이아웃·복잡한 출판사 CSS는 별도 튜닝이 필요할 수 있습니다. 글자 크기 변경 시 EPUB.js의 줄 경계 계산으로 CFI 문자 오프셋이 조금 달라질 수 있지만 같은 문단 부근을 유지합니다. iPad 화면 너비는 Chromium에서 확인했으며 실제 iPad Safari의 터치 선택은 실기기 검증이 필요합니다. 여러 탭·기기 간 복잡한 병합은 지원하지 않습니다.
+개인용 단일 사용자이며 Anki, 음성 생성, LLM은 포함하지 않습니다. DRM EPUB은 지원하지 않습니다. EPUB 2/3 메타데이터에 지정된 JPEG·PNG·GIF·WebP 표지를 표시하며, 표지가 없거나 형식을 지원하지 않으면 제목 첫 글자를 사용합니다. 일반적인 재배치 가능한 EPUB을 우선하며 고정 레이아웃·복잡한 출판사 CSS는 별도 튜닝이 필요할 수 있습니다. 글자 크기 변경 시 EPUB.js의 줄 경계 계산으로 CFI 문자 오프셋이 조금 달라질 수 있지만 같은 문단 부근을 유지합니다. iPad 화면 너비는 Chromium에서 확인했으며 실제 iPad Safari의 터치 선택은 실기기 검증이 필요합니다. 여러 탭·기기 간 복잡한 병합은 지원하지 않습니다.

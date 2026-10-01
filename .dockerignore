@@ -1,0 +1,17 @@
+.git
+.codegraph
+.next
+node_modules
+data
+**/*.epub
+**/*.sqlite*
+**/*.db*
+.env*
+*.tsbuildinfo
+test-results
+playwright-report
+tests
+deploy
+README.md
+AGENTS.md
+CLAUDE.md
