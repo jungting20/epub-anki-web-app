@@ -122,7 +122,8 @@ Argo CD 연결은 아직 구성하지 않았습니다.
 ## GitHub Actions
 
 `.github/workflows/ci.yml`은 `main` push와 `main` 대상 PR에서 Node.js 24로
-타입 검사, 프로덕션 빌드, 단위·브라우저 테스트를 실행합니다. Ubuntu runner에는
+타입 검사, 프로덕션 빌드, 단위·브라우저 테스트를 ARM64 Ubuntu runner에서 실행합니다.
+Ubuntu runner에는
 Playwright Chromium과 시스템 의존성을 설치하고 `CHROME_PATH`를 지정합니다.
 로컬 Chrome 설정은 그대로 유지합니다.
 
@@ -137,8 +138,9 @@ GHCR 로그인에는 자동 제공되는 `GITHUB_TOKEN`을 사용하고 이미�
 저장소 또는 조직 정책에서 Actions와 패키지 발행이 허용되어 있어야 합니다.
 같은 이름의 패키지가 이미 있다면 앱 저장소의 쓰기 권한을 확인하세요.
 
-이미지는 `linux/amd64`로 빌드합니다. ARM64 노드에 배포할 경우 workflow의
-플랫폼과 빌드 환경을 조정해야 합니다. 이미지 등록 후
+이미지는 서버 아키텍처에 맞춰 `linux/arm64`로 빌드합니다. 검사와 이미지 발행은
+`ubuntu-24.04-arm` runner에서 실행하므로 네이티브 SQLite 모듈도 ARM64로 설치합니다.
+이미지 등록 후
 `update-gitops` job이 `jungting20/epub-anki-gitops`의 `main`을 받아 루트의
 `kustomization.yaml`에서 `name: epub-reader` 항목의 `newName`과 `digest`를
 갱신하고 `newTag`를 제거합니다. 한글 메시지로 커밋하고 `main`에 직접 push합니다.

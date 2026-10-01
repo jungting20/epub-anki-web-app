@@ -20,7 +20,7 @@ env:
 jobs:
   test:
     name: Typecheck and tests
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     steps:
       - name: Checkout
@@ -55,7 +55,7 @@ jobs:
     name: Build and publish image
     needs: test
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     outputs:
       image-name: ${{ steps.image.outputs.name }}
@@ -89,7 +89,7 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64
+          platforms: linux/arm64
           push: true
           tags: ${{ steps.image.outputs.name }}:${{ github.sha }}
           labels: |
