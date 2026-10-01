@@ -5,7 +5,25 @@ export const maxDuration = 360;
 
 export async function POST(request: Request) {
   const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin)
+  const requestUrl = new URL(request.url);
+  // Standalone Next.js may use its internal bind address in request.url.
+  // Host retains the address used by the browser, including an SSH tunnel's port.
+  const host = request.headers.get("host") || requestUrl.host;
+  const forwardedProtocol = request.headers
+    .get("x-forwarded-proto")
+    ?.split(",")[0]
+    .trim();
+  const protocol =
+    forwardedProtocol === "https" || forwardedProtocol === "http"
+      ? forwardedProtocol
+      : requestUrl.protocol.slice(0, -1);
+  let expectedOrigin;
+  try {
+    expectedOrigin = new URL(`${protocol}://${host}`).origin;
+  } catch {
+    expectedOrigin = null;
+  }
+  if (origin && origin !== expectedOrigin)
     return Response.json(
       { error: "허용되지 않은 요청입니다." },
       { status: 403 },
