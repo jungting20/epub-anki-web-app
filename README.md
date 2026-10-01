@@ -116,7 +116,32 @@ docker push ghcr.io/YOUR_ACCOUNT/epub-reader:VERSION
 ```
 
 배포 준비와 Argo CD 연결 방법은 GitOps 저장소의 README를 참고하세요.
-현재 GitHub Actions, GHCR 발행 자동화와 Argo CD 연결은 아직 구성하지 않았습니다.
+GitOps 저장소 갱신과 Argo CD 연결은 아직 구성하지 않았습니다.
+
+## GitHub Actions
+
+`.github/workflows/ci.yml`은 `main` push와 `main` 대상 PR에서 Node.js 24로
+타입 검사, 프로덕션 빌드, 단위·브라우저 테스트를 실행합니다. Ubuntu runner에는
+Playwright Chromium과 시스템 의존성을 설치하고 `CHROME_PATH`를 지정합니다.
+로컬 Chrome 설정은 그대로 유지합니다.
+
+검사가 성공한 `main` push 또는 `main`에서의 수동 실행은 Docker 이미지를 빌드해
+`ghcr.io/<소유자>/<앱 저장소 이름>:<커밋 SHA>`에 등록합니다. 현재 원격 저장소 기준
+주소는 `ghcr.io/jungting20/epub-anki-web-app`입니다. PR에서는 이미지를 등록하지
+않습니다. Actions의 수동 실행은 `workflow_dispatch`로 제공하며, 기본 브랜치에
+워크플로 파일을 push한 뒤 사용할 수 있습니다.
+
+GHCR 로그인에는 자동 제공되는 `GITHUB_TOKEN`을 사용하고 이미지 발행 job에만
+`packages: write` 권한을 부여합니다. 별도 업로드용 Secret은 필요하지 않습니다.
+저장소 또는 조직 정책에서 Actions와 패키지 발행이 허용되어 있어야 합니다.
+같은 이름의 패키지가 이미 있다면 앱 저장소의 쓰기 권한을 확인하세요.
+
+이미지는 `linux/amd64`로 빌드합니다. ARM64 노드에 배포할 경우 workflow의
+플랫폼과 빌드 환경을 조정해야 합니다. 첫 발행 후 Actions 실행 요약에서 이미지
+digest를 확인하고 GitOps 저장소의 `kustomization.yaml`에 `newName`과 `digest`를
+설정하세요. `newTag`는 제거합니다. 이 워크플로는 GitOps 저장소를 변경하거나
+Kubernetes에 배포하지 않습니다. GHCR 패키지의 공개 범위와 비공개 이미지의
+Kubernetes pull 인증은 별도로 설정합니다.
 
 ## 현재 제약
 
