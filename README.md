@@ -101,11 +101,10 @@ docker run --name epub-reader --rm -p 127.0.0.1:3000:3000 \
 기존 데이터를 이전할 때는 원본 서버를 정지한 후 데이터 디렉터리 전체를 복사하고,
 컨테이너 사용자 UID/GID `1000:1000`이 읽고 쓸 수 있는지 확인하세요.
 
-`deploy/`는 운영 환경 하나를 위한 Kustomize 설정입니다. 단일 Pod와 `Recreate`
-전략을 사용하므로 배포 중 짧은 중단이 발생합니다. `/data`에는 5Gi PVC를 연결합니다.
-기본 StorageClass가 SQLite WAL에 적합한 블록 스토리지인지 먼저 확인하고,
-필요하면 `pvc.yaml`에 `storageClassName`을 지정하세요. NFS는 사용하지 않습니다.
-CPU/메모리 값은 초기값이며 최대 50MB EPUB 업로드를 측정해 조정해야 합니다.
+Kubernetes 배포 YAML은 별도 GitOps 저장소
+[`epub-anki-gitops`](../epub-anki-gitops/README.md)에서 관리합니다.
+이 앱 저장소는 소스 코드와 Dockerfile을 관리하고, GitOps 저장소는 실행할 이미지와
+Deployment·Service·PVC 설정을 관리합니다.
 
 아래의 `YOUR_ACCOUNT`와 `VERSION`을 실제 값으로 바꾸고, 노드 아키텍처에 맞는
 이미지를 레지스트리에 먼저 올리세요. 다른 아키텍처나 여러 아키텍처에 배포한다면
@@ -116,31 +115,8 @@ docker tag epub-reader:local ghcr.io/YOUR_ACCOUNT/epub-reader:VERSION
 docker push ghcr.io/YOUR_ACCOUNT/epub-reader:VERSION
 ```
 
-`deploy/deployment.yaml`의 `image` 자리표시자를 발행한 이미지 주소로 바꾸세요.
-GitOps에서는 `ghcr.io/YOUR_ACCOUNT/epub-reader@sha256:...`처럼 digest를 고정합니다.
-비공개 GHCR 이미지는 namespace에 pull 인증 Secret을 준비하고 Deployment의
-`spec.template.spec.imagePullSecrets`에 연결해야 합니다. 인증 값은 Git에 넣지 마세요.
-
-```sh
-kubectl kustomize deploy
-kubectl apply -k deploy
-kubectl -n epub-reader rollout status deployment/epub-reader
-kubectl -n epub-reader port-forward service/epub-reader 3000:80
-```
-
-Service는 ClusterIP이므로 우선 port-forward로 접속합니다. 도메인, TLS, VPN 또는
-인증 프록시는 실제 클러스터 구성에 맞춰 추가합니다. 앱에는 로그인 기능이 없습니다.
-Ingress를 추가한다면 50MB 파일의 multipart 여유를 포함한 요청 크기와 타임아웃을
-설정하세요. startup/liveness는 `/`, readiness는 SQLite에 접근하는 `/api/books`를
-검사합니다. 개인 책장에 접근하지 않는 별도 볼륨으로 업로드, 위치 저장, 재시작 후
-복원을 확인한 뒤 기존 데이터를 이전하세요.
-
-나중에 별도 GitOps 저장소를 만들면 `deploy/`를 옮기고 Argo CD가 그 경로를
-동기화하도록 연결합니다. Namespace와 PVC에는 Argo CD의 자동 prune 및 Application
-삭제 시 삭제를 막는 annotation을 넣었습니다. `kubectl delete`로 직접 삭제하는 것은
-막지 않으므로 데이터가 있는 namespace/PVC를 삭제하지 마세요. PV reclaim policy와
-데이터 백업/복원도 별도로 준비해야 합니다. DB 마이그레이션은 이미지 롤백으로
-되돌아가지 않습니다. 현재 CI와 Argo CD 연결은 포함하지 않습니다.
+배포 준비와 Argo CD 연결 방법은 GitOps 저장소의 README를 참고하세요.
+현재 GitHub Actions, GHCR 발행 자동화와 Argo CD 연결은 아직 구성하지 않았습니다.
 
 ## 현재 제약
 
