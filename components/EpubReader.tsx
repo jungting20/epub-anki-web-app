@@ -7,6 +7,7 @@ import type { Location } from "epubjs/types/rendition";
 import type { NavItem } from "epubjs/types/navigation";
 import type { BookInfo, ReadingSettings, SelectionInfo } from "@/lib/types";
 import { PositionTracker, restorePosition } from "@/lib/positions";
+import { reportedLocation } from "@/lib/reader-location";
 async function withTimeout<T>(
   promise: Promise<T>,
   message: string,
@@ -22,6 +23,15 @@ async function withTimeout<T>(
   } finally {
     clearTimeout(timer);
   }
+}
+async function settleLayout(rendition: Rendition) {
+  // getContents() returns an array, despite EPUB.js's declaration naming one Contents.
+  const contents = rendition.getContents() as unknown as Contents[];
+  await Promise.all(contents.map((content) => content.document.fonts?.ready));
+  // Let ResizeObserver expand the themed iframe before measuring the saved CFI again.
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
 }
 function flatten(
   items: NavItem[],
@@ -234,12 +244,14 @@ export default function EpubReader({
         rendition.on("displayError", (err: Error) => {
           if (!cancelled) setError("본문을 표시할 수 없습니다: " + err.message);
         });
+        let restored = false;
         if (saved) {
           try {
             await withTimeout(
               rendition.display(saved.cfi),
               "저장된 위치를 열지 못했습니다.",
             );
+            restored = true;
           } catch {
             await rendition.display();
             if (!cancelled)
@@ -248,8 +260,14 @@ export default function EpubReader({
         } else
           await withTimeout(rendition.display(), "본문을 표시하지 못했습니다.");
         if (cancelled) return;
-        // reportLocation drains the rendition queue after the restore display.
-        await rendition.reportLocation();
+        await withTimeout(
+          settleLayout(rendition),
+          "본문 레이아웃을 준비하지 못했습니다.",
+        );
+        if (cancelled) return;
+        // The initial CFI scroll can precede theme/font layout; restore once layout is ready.
+        if (restored && saved) await rendition.display(saved.cfi);
+        await reportedLocation(rendition);
         if (cancelled) return;
         tracker = new PositionTracker(
           book.id,
@@ -306,8 +324,13 @@ export default function EpubReader({
     const timer = setTimeout(() => {
       void (async () => {
         try {
+          await withTimeout(
+            settleLayout(rendition),
+            "읽기 설정을 적용하지 못했습니다.",
+          );
+          if (cancelled) return;
           if (cfi) await rendition.display(cfi);
-          await rendition.reportLocation();
+          await reportedLocation(rendition);
         } catch {
           if (!cancelled)
             setError("읽기 설정을 적용하지 못했습니다. 다시 시도해주세요.");

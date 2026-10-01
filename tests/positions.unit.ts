@@ -93,3 +93,34 @@ test("continuous changes still reach the server within the maximum wait", async 
     globalThis.fetch = original;
   }
 });
+
+test("EPUB location reporting waits for relocation rather than the queued promise", async () => {
+  const { EventEmitter } = await import("node:events");
+  const { reportedLocation } = await import("../lib/reader-location");
+  const rendition = Object.assign(new EventEmitter(), {
+    reportLocation: async () => {},
+  });
+  let completed = false;
+  const reporting = reportedLocation(rendition as never).then((location) => {
+    completed = true;
+    return location;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(completed, false);
+  const expected = { start: { cfi: "epubcfi(/6/4!/4/42/1:129)" } };
+  rendition.emit("relocated", expected);
+  assert.equal(await reporting, expected);
+  assert.equal(rendition.listenerCount("relocated"), 0);
+});
+
+test("EPUB failed reporting releases its relocation listener", async () => {
+  const { EventEmitter } = await import("node:events");
+  const { reportedLocation } = await import("../lib/reader-location");
+  const rendition = Object.assign(new EventEmitter(), {
+    reportLocation: async () => {
+      throw new Error("Failed");
+    },
+  });
+  await assert.rejects(reportedLocation(rendition as never), /Failed/);
+  assert.equal(rendition.listenerCount("relocated"), 0);
+});
