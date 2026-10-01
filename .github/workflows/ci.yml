@@ -57,6 +57,9 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    outputs:
+      image-name: ${{ steps.image.outputs.name }}
+      image-digest: ${{ steps.build.outputs.digest }}
     permissions:
       contents: read
       packages: write
@@ -102,3 +105,78 @@ jobs:
         run: |
           printf 'Published image: `%s:%s`\n\n' "$IMAGE_NAME" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
           printf 'GitOps image reference: `%s@%s`\n' "$IMAGE_NAME" "$IMAGE_DIGEST" >> "$GITHUB_STEP_SUMMARY"
+
+  update-gitops:
+    name: Update GitOps image
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check GitOps token
+        env:
+          GITOPS_TOKEN: ${{ secrets.GITOPS_TOKEN }}
+        run: |
+          if [ -z "$GITOPS_TOKEN" ]; then
+            echo "::error::Add the GITOPS_TOKEN Actions secret with Contents read/write access to the GitOps repository."
+            exit 1
+          fi
+
+      - name: Checkout application scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Checkout GitOps repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: jungting20/epub-anki-gitops
+          ref: main
+          path: gitops
+          token: ${{ secrets.GITOPS_TOKEN }}
+          # Persist this repository's token so git push uses it; checkout cleans it up.
+          persist-credentials: true
+
+      - name: Install YAML tooling
+        run: |
+          python3 -m venv "$RUNNER_TEMP/gitops-venv"
+          "$RUNNER_TEMP/gitops-venv/bin/pip" install PyYAML==6.0.2
+
+      - name: Update image and push
+        working-directory: gitops
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_NAME: ${{ needs.publish.outputs.image-name }}
+          IMAGE_DIGEST: ${{ needs.publish.outputs.image-digest }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          for attempt in 1 2 3; do
+            latest_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+            if [ "$latest_sha" != "$GITHUB_SHA" ]; then
+              echo 'A newer main commit exists; skipping this image update.' >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+
+            # Reapply to the latest GitOps commit if a concurrent push is rejected.
+            git fetch origin main
+            git checkout --detach origin/main
+            "$RUNNER_TEMP/gitops-venv/bin/python" \
+              "$GITHUB_WORKSPACE/scripts/update_gitops_image.py" \
+              kustomization.yaml "$IMAGE_NAME" "$IMAGE_DIGEST"
+
+            if git diff --quiet -- kustomization.yaml; then
+              echo 'GitOps already references this image.' >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+
+            git add kustomization.yaml
+            git commit -m "앱 이미지 버전 갱신: $GITHUB_SHA"
+            if git push origin HEAD:main; then
+              printf 'GitOps updated: `%s@%s`\n' "$IMAGE_NAME" "$IMAGE_DIGEST" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          done
+
+          echo '::error::GitOps push failed after three attempts. Check token permissions and branch protection.'
+          exit 1

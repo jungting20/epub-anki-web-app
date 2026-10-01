@@ -15,3 +15,6 @@ deploy
 README.md
 AGENTS.md
 CLAUDE.md
+.github
+scripts
+gitops

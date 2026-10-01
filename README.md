@@ -116,7 +116,8 @@ docker push ghcr.io/YOUR_ACCOUNT/epub-reader:VERSION
 ```
 
 배포 준비와 Argo CD 연결 방법은 GitOps 저장소의 README를 참고하세요.
-GitOps 저장소 갱신과 Argo CD 연결은 아직 구성하지 않았습니다.
+GitHub Actions가 이미지 발행 후 GitOps 저장소의 이미지 버전을 갱신합니다.
+Argo CD 연결은 아직 구성하지 않았습니다.
 
 ## GitHub Actions
 
@@ -137,10 +138,36 @@ GHCR 로그인에는 자동 제공되는 `GITHUB_TOKEN`을 사용하고 이미�
 같은 이름의 패키지가 이미 있다면 앱 저장소의 쓰기 권한을 확인하세요.
 
 이미지는 `linux/amd64`로 빌드합니다. ARM64 노드에 배포할 경우 workflow의
-플랫폼과 빌드 환경을 조정해야 합니다. 첫 발행 후 Actions 실행 요약에서 이미지
-digest를 확인하고 GitOps 저장소의 `kustomization.yaml`에 `newName`과 `digest`를
-설정하세요. `newTag`는 제거합니다. 이 워크플로는 GitOps 저장소를 변경하거나
-Kubernetes에 배포하지 않습니다. GHCR 패키지의 공개 범위와 비공개 이미지의
+플랫폼과 빌드 환경을 조정해야 합니다. 이미지 등록 후
+`update-gitops` job이 `jungting20/epub-anki-gitops`의 `main`을 받아 루트의
+`kustomization.yaml`에서 `name: epub-reader` 항목의 `newName`과 `digest`를
+갱신하고 `newTag`를 제거합니다. 한글 메시지로 커밋하고 `main`에 직접 push합니다.
+동일한 이미지라면 추가 커밋을 만들지 않습니다. 앱의 `main`이 이미 새 커밋으로
+바뀌었다면 이전 실행의 GitOps 갱신은 건너뜁니다. GitOps 저장소에 동시 변경이
+있으면 최신 커밋에 다시 갱신을 적용해 최대 세 번 push를 시도합니다.
+
+### GitOps 갱신용 Secret
+
+앱 저장소의 기본 `GITHUB_TOKEN`은 다른 저장소에 쓸 수 없으므로 별도 인증이
+필요합니다. GitHub에서 다음과 같이 fine-grained personal access token을 만드세요.
+
+1. 계정 Settings → Developer settings → Personal access tokens → Fine-grained tokens
+2. Resource owner: `jungting20`
+3. Repository access: `Only select repositories` → `epub-anki-gitops`만 선택
+4. Repository permissions → Contents: `Read and write`
+5. 유효기간을 정해 토큰 생성
+6. **앱 저장소** Settings → Secrets and variables → Actions → New repository secret
+7. 이름 `GITOPS_TOKEN`, 값은 생성한 토큰
+
+토큰은 코드나 커밋에 넣지 않습니다. 토큰을 등록하지 않으면 이미지 발행 후
+GitOps 갱신 job이 안내 메시지와 함께 실패합니다. GitOps 저장소의 `main`에
+직접 push할 수 있어야 하며, PR 필수 등의 보호 규칙이 있으면 현재 방식은
+실패합니다. 토큰 유효기간이 만료되면 Secret을 갱신하세요.
+
+Actions 실행 요약에서 발행한 이미지와 GitOps 갱신 결과를 확인합니다. GitOps
+저장소를 별도로 pull하면 자동 생성된 커밋을 볼 수 있습니다. 워크플로는
+Kubernetes에 직접 배포하지 않으며, Argo CD를 이 GitOps 저장소에 연결하고 자동
+동기화를 활성화해야 실제 배포됩니다. GHCR 패키지의 공개 범위와 비공개 이미지의
 Kubernetes pull 인증은 별도로 설정합니다.
 
 ## 현재 제약
