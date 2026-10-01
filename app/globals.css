@@ -625,3 +625,23 @@ select {
   height: 100%;
   object-fit: cover;
 }
+
+.anki-controls {
+  display: grid;
+  gap: 10px;
+  margin-top: 24px;
+  font-size: 13px;
+}
+.anki-controls input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+}
+.anki-controls .muted {
+  margin: 0;
+}

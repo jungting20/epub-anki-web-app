@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "tsx --test tests/positions.unit.ts && playwright test",
+    "test": "tsx --test tests/positions.unit.ts tests/anki.unit.ts && playwright test",
     "dev": "next dev --hostname 127.0.0.1",
     "build": "next build",
     "start": "next start --hostname 127.0.0.1",

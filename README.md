@@ -117,7 +117,7 @@ docker push ghcr.io/YOUR_ACCOUNT/epub-reader:VERSION
 
 배포 준비와 Argo CD 연결 방법은 GitOps 저장소의 README를 참고하세요.
 GitHub Actions가 이미지 발행 후 GitOps 저장소의 이미지 버전을 갱신합니다.
-Argo CD 연결은 아직 구성하지 않았습니다.
+서버의 Argo CD에 GitOps 저장소를 연결하고 첫 배포와 자동 동기화를 구성했습니다.
 
 ## GitHub Actions
 
@@ -174,4 +174,77 @@ Kubernetes pull 인증은 별도로 설정합니다.
 
 ## 현재 제약
 
-개인용 단일 사용자이며 Anki, 음성 생성, LLM은 포함하지 않습니다. DRM EPUB은 지원하지 않습니다. EPUB 2/3 메타데이터에 지정된 JPEG·PNG·GIF·WebP 표지를 표시하며, 표지가 없거나 형식을 지원하지 않으면 제목 첫 글자를 사용합니다. 일반적인 재배치 가능한 EPUB을 우선하며 고정 레이아웃·복잡한 출판사 CSS는 별도 튜닝이 필요할 수 있습니다. 글자 크기 변경 시 EPUB.js의 줄 경계 계산으로 CFI 문자 오프셋이 조금 달라질 수 있지만 같은 문단 부근을 유지합니다. iPad 화면 너비는 Chromium에서 확인했으며 실제 iPad Safari의 터치 선택은 실기기 검증이 필요합니다. 여러 탭·기기 간 복잡한 병합은 지원하지 않습니다.
+개인용 단일 사용자이며 문장 번역은 Hermes를 사용합니다. 문장 변형은 포함하지 않습니다. DRM EPUB은 지원하지 않습니다. EPUB 2/3 메타데이터에 지정된 JPEG·PNG·GIF·WebP 표지를 표시하며, 표지가 없거나 형식을 지원하지 않으면 제목 첫 글자를 사용합니다. 일반적인 재배치 가능한 EPUB을 우선하며 고정 레이아웃·복잡한 출판사 CSS는 별도 튜닝이 필요할 수 있습니다. 글자 크기 변경 시 EPUB.js의 줄 경계 계산으로 CFI 문자 오프셋이 조금 달라질 수 있지만 같은 문단 부근을 유지합니다. iPad 화면 너비는 Chromium에서 확인했으며 실제 iPad Safari의 터치 선택은 실기기 검증이 필요합니다. 여러 탭·기기 간 복잡한 병합은 지원하지 않습니다.
+
+## Anki 듣기 카드 등록
+
+문장을 선택한 뒤 왼쪽 사이드바의 **Anki 덱 경로**에 `영어::독서::책 이름`처럼 입력하고
+**Anki 카드 생성**을 누릅니다. 덱 경로는 브라우저에 저장됩니다. 없는 덱은 새로 생성합니다.
+카드 종류는 `Basic`이며 **Front는 선택 문장의 MP3 음성**, **Back은 선택한 영어 문장과 한글 번역**입니다.
+기존 `Basic` 노트 유형이 있으면 사용하고, 없으면 Front·Back 필드와 카드 템플릿 하나를 생성합니다.
+등록 후 사용자 Anki에서 동기화해야 카드와 음성이 내려옵니다.
+
+`POST /api/anki/cards` → `scripts/register_anki_card.py` → Hermes 번역(`gpt-6-luna`, `medium`) → ElevenLabs 음성 생성 →
+Anki Python 클라이언트에서 노트 생성 → 컬렉션·미디어 동기화 순서로 실행합니다.
+API에는 `text`, `deck`, `title`, `chapter`, `context` 문자열을 보냅니다.
+`context`는 선택 문장의 주변 문맥이며 번역 참고에만 사용합니다. 제목과 챕터는 요청의 출처 정보이며
+이번 카드에는 앞면 음성과 뒷면의 영어 문장·한글 번역을 저장합니다. 요청을 기다리는 동안 등록 버튼을 비활성화합니다.
+
+서버에 다음 환경변수가 필요합니다. 기존 english-study 프로필의 음성 설정과 Anki 동기화
+계정을 사용할 수 있으며, 값을 브라우저나 Git에 넣지 마세요.
+
+| 변수                  | 설명                                                             |
+| --------------------- | ---------------------------------------------------------------- |
+| `ANKI_SYNC_ENDPOINT`  | `/`로 끝나는 동기화 서버 URL. 컨테이너에서 접속 가능한 주소 사용 |
+| `ANKI_SYNC_USER`      | 동기화 계정                                                      |
+| `ANKI_SYNC_PASSWORD`  | 계정의 원본 비밀번호 (서버의 비밀번호 해시 아님)                 |
+| `ELEVENLABS_API_KEY`  | 음성 생성 API 키                                                 |
+| `ELEVENLABS_VOICE_ID` | 영어 음성 ID                                                     |
+| `ELEVENLABS_MODEL`    | 기본값 `eleven_v4`                                               |
+| `ANKI_PYTHON`         | Anki 패키지를 설치한 Python 실행 파일                            |
+
+Docker 이미지는 Python 가상환경(`anki==26.8.1`), ffmpeg, SSH 클라이언트를 포함하며 `ANKI_PYTHON`을
+`/opt/anki/bin/python`으로 설정합니다. Kubernetes 배포는 위 접속 정보 5개를 Secret으로
+주입하고, 앱의 `/data`를 영속 볼륨으로 유지해야 합니다. 같은 OCI 서버여도 컨테이너의
+`localhost`는 호스트를 가리키지 않으므로 Anki 동기화 서비스에 도달하는 주소를 사용하세요.
+호스트에서 직접 Next.js를 실행하면 기존 `/home/hermes/anki-sync-server/venv/bin/python`을
+사용할 수 있습니다. 별도 환경 설치는 다음과 같습니다.
+
+```sh
+python3 -m venv .venv-anki
+.venv-anki/bin/pip install -r scripts/requirements-anki.txt
+# ffmpeg/ffprobe도 설치하고 ANKI_PYTHON을 이 가상환경의 절대 경로로 지정
+```
+
+작업용 컬렉션과 음성 캐시는 `<EPUB_DATA_DIR>/anki/`에 저장합니다. 기존 english-study의
+작업용 컬렉션이나 학습 진도 파일을 공유하지 않습니다. 같은 덱·같은 문장은 식별 태그로
+재사용하며, 실패한 요청을 같은 문장과 덱으로 다시 실행하면 동기화를 이어갑니다.
+한 번에 한 작업만 컬렉션을 수정하도록 파일 잠금을 사용합니다. 기존 카드가 수정됐거나
+전체 동기화가 필요하면 자동 덮어쓰기를 중단합니다. 음성 생성은 외부 API를 사용하므로
+비용이 발생하며, 응답이 유실된 요청의 재시도는 추가 음성 생성 비용이 발생할 수 있습니다.
+
+개인용 API이므로 외부 공개 시 앱 전체를 기존 인증·접근 제한 뒤에 두세요.
+Python 검증은 `python tests/anki_worker_test.py`로 실행하며, 외부 서버나 음성 API 없이
+임시 Anki 컬렉션으로 Basic 카드 생성·중복 재시도·실패 후 복구를 검사합니다.
+
+### Hermes 번역 연결
+
+호스트에서 직접 실행할 때는 `HERMES_BIN=/home/hermes/.local/bin/hermes`로 지정합니다.
+Next.js 실행 계정에서 Hermes의 `openai-codex` 인증을 사용할 수 있어야 합니다.
+모델과 추론 강도는 `gpt-6-luna` / `medium`으로 고정합니다. 선택 문장과 문맥을 JSON으로
+전달하고 한국어 번역만 받아, Back에 영어 원문 다음 빈 줄과 번역을 추가합니다.
+번역 결과는 `<EPUB_DATA_DIR>/anki/cards/`에 저장하므로 재시도 때 다시 번역하지 않습니다.
+번역 실패나 잘못된 응답은 카드 등록 전에 중단하며, 번역을 생략한 카드를 만들지 않습니다.
+
+Docker에서는 호스트의 Hermes 설치·인증을 SSH로 이용할 수 있습니다.
+
+| 변수                          | 설명                                                                   |
+| ----------------------------- | ---------------------------------------------------------------------- |
+| `HERMES_BIN`                  | 호스트의 Hermes CLI 절대 경로. 기본값 `/home/hermes/.local/bin/hermes` |
+| `HERMES_SSH_TARGET`           | 컨테이너에서 접속 가능한 `hermes@호스트주소`. 미설정 시 로컬 CLI 사용  |
+| `HERMES_SSH_IDENTITY_FILE`    | 컨테이너 안에 마운트한 SSH 개인 키 경로                                |
+| `HERMES_SSH_KNOWN_HOSTS_FILE` | 서버 호스트 키를 미리 등록해 마운트한 known_hosts 경로                 |
+
+키·known_hosts는 Secret/볼륨으로 제공하고 앱 실행 사용자(`node`)가 읽을 수 있도록 설정합니다.
+SSH 호스트 키 검증은 필수입니다. Hermes CLI·OpenAI 인증은 호스트에서 유지하며 Docker 이미지에
+복사하지 않습니다. 프롬프트는 표준입력으로만 전달하고 번역 실행에는 도구를 활성화하지 않습니다.

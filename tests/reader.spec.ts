@@ -110,6 +110,39 @@ test("EPUB selection, navigation, restore, and offline synchronization", async (
   expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(
     "morning light",
   );
+  await page.getByLabel("Anki 덱 경로").fill("영어::독서::내 책");
+  let cardRequests = 0;
+  await page.route("**/api/anki/cards", async (route) => {
+    const payload = route.request().postDataJSON();
+    expect(payload.deck).toBe("영어::독서::내 책");
+    expect(payload.text).toContain("morning light");
+    expect(payload.title).toBe("The Quiet Garden");
+    expect(typeof payload.context).toBe("string");
+    cardRequests++;
+    await route.fulfill({
+      status: cardRequests === 1 ? 503 : 200,
+      contentType: "application/json",
+      body: JSON.stringify(
+        cardRequests === 1
+          ? { error: "음성 생성에 실패했습니다. 다시 시도해주세요." }
+          : { noteId: 1, cardId: 2, deck: payload.deck, duplicate: false },
+      ),
+    });
+  });
+  await page
+    .getByRole("button", { name: "Anki 카드 생성", exact: true })
+    .click();
+  await expect(page.locator(".sentence-actions [role=status]")).toContainText(
+    "음성 생성에 실패했습니다",
+  );
+  await expect(page.locator("blockquote")).toContainText("morning light");
+  await page
+    .getByRole("button", { name: "Anki 카드 생성", exact: true })
+    .click();
+  await expect(page.locator(".sentence-actions [role=status]")).toContainText(
+    "내 책 덱에 등록했습니다",
+  );
+  expect(cardRequests).toBe(2);
   await page.getByRole("button", { name: "선택 초기화" }).click();
   await expect(page.locator("blockquote")).toHaveCount(0);
   await page.locator(".reader-settings > summary").click();
@@ -135,6 +168,10 @@ test("EPUB selection, navigation, restore, and offline synchronization", async (
   expect(changed.cfi.split("/1:")[0]).toBe(before.cfi.split("/1:")[0]);
   await page.reload();
   await ready(page);
+  // Deck preference is retained across reader reloads.
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("anki-deck")))
+    .toBe("영어::독서::내 책");
   await expect(page.getByLabel("글자 크기")).toHaveValue("25");
   await expect(page.getByLabel("줄 간격")).toHaveValue("2");
   await expect(page.locator(".reader-footer")).toContainText("Chapter Two");
@@ -260,4 +297,22 @@ test("upload through the UI opens the book, touch selection persists, rapid swit
   );
   await page.setViewportSize({ width: 1024, height: 768 });
   await page.screenshot({ path: "test-results/ipad-width.png" });
+});
+
+test("Anki API rejects invalid card input before starting a worker", async ({
+  request,
+}) => {
+  const invalid = await request.post("/api/anki/cards", {
+    data: { text: "", deck: "" },
+  });
+  expect(invalid.status()).toBe(400);
+  const crossOrigin = await request.post("/api/anki/cards", {
+    headers: { Origin: "https://example.com" },
+    data: {},
+  });
+  expect(crossOrigin.status()).toBe(403);
+  const large = await request.post("/api/anki/cards", {
+    data: { text: "a".repeat(65_000) },
+  });
+  expect(large.status()).toBe(413);
 });

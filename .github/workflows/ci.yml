@@ -48,6 +48,12 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Test Anki worker without external services
+        run: |
+          python3 -m venv "$RUNNER_TEMP/anki-test-venv"
+          "$RUNNER_TEMP/anki-test-venv/bin/pip" install -r scripts/requirements-anki.txt
+          "$RUNNER_TEMP/anki-test-venv/bin/python" tests/anki_worker_test.py
+
       - name: Run unit and browser tests
         run: npm test
 

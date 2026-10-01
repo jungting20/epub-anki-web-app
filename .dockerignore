@@ -16,5 +16,10 @@ README.md
 AGENTS.md
 CLAUDE.md
 .github
-scripts
+scripts/*
+!scripts/register_anki_card.py
+!scripts/requirements-anki.txt
 gitops
+
+.venv-anki
+**/__pycache__

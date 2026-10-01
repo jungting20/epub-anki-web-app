@@ -8,3 +8,6 @@ data/
 *.tsbuildinfo
 test-results/
 playwright-report/
+
+.venv-anki/
+__pycache__/
